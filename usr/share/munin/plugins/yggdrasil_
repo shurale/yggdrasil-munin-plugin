@@ -1,0 +1,493 @@
+#!/usr/bin/perl -w
+# -*- perl -*-
+# vim: ft=perl : sw=4 : ts=4 : et
+# Use as exapmle varnish and yum plugins
+# # varnish_ - Munin plugin to for Varnish
+# # Copyright (C) 2009  Redpill Linpro AS
+# #
+# # Author: Kristian Lyngstol <kristian@bohemians.org>
+# 
+# # yum - Plugin for monitoring pending package upgrades with yum
+# # Copyright 2006 Dagfinn Ilmari Mannsåker <ilmari@lonres.com>
+#
+
+=head1 NAME
+
+yggdrasil - Plugin for monitoring yggdrasil meshnet status
+
+=head1 USAGE
+
+Something
+
+=head1 AUTHOR
+
+Copyright 2019 Shura Shurakov <shura@shuracov.ru>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+ #%# capabilities=autoconf
+
+=cut
+
+use strict;
+
+# Data structure that defines all possible graphs (aspects) and how they
+# # are to be plotted. Every top-level entry is a graph/aspect. Each
+# # top-level graph MUST have title set and 'values'.
+#
+
+my %ASPECTS = (
+        'connections' => {
+                # 'DEBUG' => 'YES',
+                'title' => 'Yggdrasil: connections to server',
+		'order' => 'n_connects n_connect_tcp n_connect_awdl '
+			. 'n_connect_self n_connect_sim',
+                'args' => '-l 0',
+                'values' => {
+                        'n_connects' => {
+                                'type' => 'GAUGE',
+				# 'min' => '0',
+				'label' => 'Total connections'
+                        },
+                        'n_connect_sim' => {
+                                'type' => 'GAUGE',
+				'label' => 'Simulate connections'
+                        },
+                        'n_connect_self' => {
+                                'type' => 'GAUGE',
+				'label' => 'Self connections'
+                        },
+                        'n_connect_awdl' => {
+                                'type' => 'GAUGE',
+				'label' => 'AWDL connections'
+                        },
+                        'n_connect_tcp' => {
+                                'type' => 'GAUGE',
+				'label' => 'TCP connections'
+                        }
+                }
+        },
+        'traffic' => {
+                'title' => 'Yggdrasil: network traffic',
+                'info' => 'This graph shows the traffic of the yggdrasil network',
+                'vlabel' => 'Bytes/${graph_period} receive (-) / send (+)',
+                'order' => 'total_recv total_sent tcp_recv tcp_sent'
+			. 'awdl_recv awdl_senti self_recv self_sent'
+			. 'sim_recv sim_sent',
+                # 'args' => '-l 0',
+                'values' => {
+                        'total_recv' => {
+				'label' => 'Total',
+                                'type' => 'DERIVE',
+                                'graph' => 'no',
+				# 'cdef' => 'total_recv,1,*',
+                                'min' => '0' #, 'graph' => 'ON'
+                        },
+                        'total_sent' => {
+                                'type' => 'DERIVE',
+				'label' => 'Total',
+				'info' => 'Total traffic',
+                                'negative' => 'total_recv',
+				# 'cdef' => 'total_sent,1,*',
+                                'min' => '0' #, 'graph' => 'ON'
+                        },
+                        'tcp_recv' => {
+				'label' => 'TCP',
+                                'type' => 'DERIVE',
+                                'graph' => 'no',
+                                'min' => '0'
+                        },
+                        'tcp_sent' => {
+                                'type' => 'DERIVE',
+				'label' => 'TCP',
+				'info' => 'TCP traffic',
+                                'negative' => 'tcp_recv',
+                                'min' => '0'
+                        },
+                        'awdl_recv' => {
+				'label' => 'AWDL',
+                                'type' => 'DERIVE',
+                                'graph' => 'no',
+                                'min' => '0'
+                        },
+                        'awdl_sent' => {
+                                'type' => 'DERIVE',
+				'label' => 'AWDL',
+				'info' => 'AWDL traffic',
+                                'negative' => 'awdl_recv',
+                                'min' => '0'
+                        },
+                        'self_recv' => {
+				'label' => 'Self',
+                                'type' => 'DERIVE',
+                                'graph' => 'no',
+                                'min' => '0'
+                        },
+                        'self_sent' => {
+                                'type' => 'DERIVE',
+				'label' => 'Self',
+				'info' => 'Self(internal)  traffic',
+                                'negative' => 'self_recv',
+                                'min' => '0'
+                        }
+# Black magic - This stanzas screw Munin graph off
+# ,
+#                        'sim_recv' => {
+#				'label' => 'Simulate sent',
+#                                'type' => 'DERIVE',
+#                                'graph' => 'no',
+#                                'min' => '0'
+#                        },
+#                        'sim_sent' => {
+#                                'type' => 'DERIVE',
+#				'label' => 'Simulate received',
+#                                'negative' => 'sim_recv',
+#                                'min' => '0'
+#                        }
+		}
+        }
+);
+
+my $statefile = "$ENV{MUNIN_PLUGSTATE}/yggdrasil.state";
+my $self;
+
+# Parameters that can be defined on top level of a graph. Config will print
+# them as "graph_$foo $value\n"
+my @graph_parameters = ('title','total','order','scale','vlabel','args');
+
+# Parameters that can be defined on a value-to-value basis and will be
+# blindly passed to config. Printed as "$fieldname.$param $value\n".
+#
+# 'label' is hardcoded as it defaults to a varnishstat-description if not
+# set.
+my @field_parameters = ('type', 'graph', 'min', 'max', 'draw', 'cdef',
+			 'warning', 'colour', 'info', 'negative');
+
+                        # Varnishstat data is stored here. Example
+                        # ('n_vbe' => { 'value' => '124', 'description'=>...,'flag'=>... }, SMA =>
+                        # { s0 => { 'value' => '...', 'flag'=> '...' },'Transient' => ...})
+                        # Both dynamic and static counters are kept here.
+                        #
+                        # Notes:
+                        #  - The 'flag' field for a counter is in RRD-dialect, not varnishstat
+my %data;
+
+# Set to 1 to enable output when a variable is defined in a graph but
+# omitted because it doesn't exist in varnishstat.
+my $DEBUG = 0;
+
+# Set to 1 to ignore 'DEBUG' and suggest all available aspects.
+my $FULL_SUGGEST = 0;
+
+# yggdrasilctl executable. Include full path if it's not in your path.
+my $yggstatexec = exists $ENV{'yggdrasilctl'} ? $ENV{'yggdrasilctl'} : "yggdrasilctl";
+#
+
+# Bail-function.
+sub usage
+{
+    if (@_) {
+        print STDERR "@_" . "\n\n";
+    }
+    print STDERR "Known arguments: suggest, config, autoconf.\n";
+    print STDERR "Run with suggest to get a list of known aspects.\n";
+    exit 1;
+}
+
+# Print the value of a two-dimensional hash if it exist.
+# Returns false if non-existent.
+#
+# Output is formatted for plugins if arg4 is blank, otherwise arg4 is used
+# as the title/name of the field (ie: arg4=graph_title).
+sub print_if_exist
+{
+	my %values = %{$_[0]};
+	my $value = $_[1];
+	my $field = $_[2];
+	my $title = "$value.$field";
+	if (defined($_[3])) {
+		$title = $_[3];
+	}
+	if (defined($values{$value}{$field})) {
+		print "$title $values{$value}{$field}\n";
+	} else {
+		return 0;
+	}
+}
+
+# Suggest relevant aspects/values of $self.
+# 'DEBUG'-graphs are excluded.
+sub suggest
+{
+        foreach my $key (sort keys %ASPECTS) {
+                if (defined($ASPECTS{$key}{'DEBUG'}) && $FULL_SUGGEST != 1) {
+                        next;
+                }
+                print "$key\n";
+        }
+}
+
+
+sub update {
+    if (-l $statefile) {
+    die "$statefile is a symlink, not touching.\n";
+    }
+
+    open my $state, '>', $statefile
+    or die "Can't open $statefile for writing: $!\n";
+
+#    open my $yum, '-|', 'yum list updates'
+#    or die "Can't run 'yum list updates': $!";
+
+    # Skip header crap
+#    while (<$yum>) {
+#    last if /^Updated/;
+#    }
+
+#    while (<$yum>) {
+#    next unless /^(\S+)\.\S+\s+\S+\s+\S+/;
+#    print $state "$1\n";
+#    }
+
+#    close $yum or die "Error running 'yum list updates': $!\n";
+    close $state or die "Error writing $statefile: $!\n";
+}
+
+sub autoconf
+{
+        # XXX: Solaris outputs errors to stderr and always returns true.
+        # XXX: See #873
+        if (`which $yggstatexec 2>/dev/null` =~ m{^/}) {
+        	print "yes\n";
+        } else {
+        	print "no ($yggstatexec could not be found)\n";
+        }
+        exit 0;
+}
+
+# Prints the fields in the list in $_[2] (e.g: 'value'/'description') for
+# each identity of the varnish counter/family combination as defined by
+# the $_[0]-counter on the aspect definition. Err, that's jibberish, so
+# an example:
+#
+# e.g: dynamic_print('SMA_1','',('value'))
+# e.g: dynamic_print('SMA_2','.label',('ident','description'))
+# SMA_1 is the counter-value. If it is a dynamic counter, it has a counter
+# and family-member (e.g: counter: c_req, family: SMA) and print_dynamic
+# will print c_req for each SMA-identity.
+#
+# Note that the variables to print is a list. This is to allow printing a
+# single item with multiple fields. Typically for identity+description so
+# you can distinguish between different data points.
+#
+# Returns true if it was a dynamic counter.
+sub print_dynamic
+{
+        my $name = $_[0];
+        shift;
+        my $suffix = $_[0];
+        shift;
+        my @field = @_;
+        if (!defined($ASPECTS{$self}{'values'}{$name}{'counter'})) {
+                return 0;
+        }
+        if (!defined($ASPECTS{$self}{'values'}{$name}{'family'})) {
+                return 0;
+        }
+        my $counter = $ASPECTS{$self}{'values'}{$name}{'counter'};
+        my $type = $ASPECTS{$self}{'values'}{$name}{'family'};
+
+
+        foreach my $key (sort keys %{$data{$type}}) {
+                my $pname = normalize_name($type . "_" . $key . "_" . $counter);
+                print $pname . $suffix . " ";
+                my $i = 0;
+                foreach my $f (@field) {
+                        if ($i != 0) {
+                                print " ";
+                        }
+                        $i += 1;
+                        print $data{$type}{$key}{$counter}{$f};
+                }
+                print "\n";
+        }
+        return 1;
+}
+
+# Walk through the relevant aspect and print all top-level configuration
+# # values and value-definitions.
+#
+sub get_config
+{
+        my $graph = $_[0];
+
+        # Need to double-check since set_aspect only checks this if there
+        # is no argument (suggest/autoconf doesn't require a valid aspect)
+        if (!defined($ASPECTS{$graph})) {
+        	usage "No such aspect";
+        }
+        my %values = %{$ASPECTS{$graph}{'values'}};
+
+        print "graph_category network\n";
+        foreach my $field (@graph_parameters) {
+        	print_if_exist(\%ASPECTS,$graph,$field,"graph_$field");
+        }
+
+        foreach my $value (sort keys %values) {
+                # Just print the description/type if it's a dynamic
+                # counter. It'll be silent if it isn't.
+                if(print_dynamic($value,'.label',('description','type','ident'))) {
+                	print_dynamic($value,'.type',('flag'));
+                	next;
+                }
+                # Need either RPN definition or a varnishstat value.
+                if (!defined($data{$value}{'value'}) &&
+                		!defined($values{$value}{'rpn'})) {
+                	if ($DEBUG) {
+                		print "ERROR: $value not part of varnishstat.\n"
+                	}
+                	next;
+                }
+                if (!print_if_exist(\%values,$value,'label')) {
+                        print "$value.label $data{$value}{'description'}\n";
+                }
+                foreach my $field (@field_parameters) {
+                        print_if_exist(\%values,$value,$field);
+                }
+        }
+}
+
+                
+                
+        
+
+sub set_aspect {
+        $self = $0;
+        $self =~ s/^.*\/yggdrasil_//;
+        if (!defined($ASPECTS{$self}) && @ARGV == 0) {
+                usage("No such aspect");
+        }
+}
+
+
+sub report {
+    my @packages;
+
+    open my $state, '<', $statefile
+    or die "Can't open $statefile for reading: $!
+Please check yggdrasil configurations to understand why if the file does not exist.\n";
+
+    chomp(@packages = <$state>);
+    close $state;
+
+    print 'pending.value ', scalar(@packages), "\n";
+    print 'pending.extinfo ', join(' ', @packages), "\n"
+    if @packages;
+}
+
+sub check_args
+{
+        if (@ARGV && $ARGV[0] eq '') {
+                shift @ARGV;
+        }
+        if (@ARGV == 1) {
+                if ($ARGV[0] eq "config") {
+                        populate_stats();
+                        get_config($self);
+                        exit 0;
+                } elsif ($ARGV[0] eq "autoconf") {
+                        autoconf($self);
+                        exit 0;
+                } elsif ($ARGV[0] eq "suggest") {
+                        suggest;
+                        exit 0;
+                }
+                usage "Unknown argument";
+        }
+}
+
+sub populate_stats
+{
+	$data{'n_connects'}{'value'} = 0;
+	open my $yum, '-|', "$yggstatexec getPeers"
+		or die "Can't run '$yggstatexec getPeers': $!";
+	my ($peers,$peers_sim,$peers_self,$peers_awdl,$peers_tcp) =
+		(0, 0, 0, 0, 0);
+	my ($total_recv, $total_sent) = (0,0);
+	my ($tcp_recv, $tcp_sent) = (0,0);
+	my ($awdl_recv, $awdl_sent) = (0,0);
+	my ($self_recv, $self_sent) = (0,0);
+	my ($sim_recv, $sim_sent) = (0,0);
+	my ($vspr, $vsps);
+
+    # Skip header crap
+	while (<$yum>) {
+		if(/^([\da-f]{1,4}:\S+)\s+(\d+)\s+(\d+)\s+/i) {	$peers++;
+			$vspr = $2; $vsps = $3;
+# print "# $peers ",$1, $2, $3,"\n";
+			$total_recv += $vspr;$total_sent += $vsps;
+			if(/\s+sim\s+/){ $peers_sim++; $sim_recv += $vspr;
+				$sim_sent += $vsps; }
+			if(/\s+self\s+/){ $peers_self++; $self_recv += $vspr;
+				$self_sent += $vsps; }
+			if(/\s+awdl\s+/i){ $peers_awdl++; $awdl_recv += $vspr;
+				$awdl_sent += $vsps; }
+			if(/\s+tcp\s+/){ $peers_tcp++; $tcp_recv += $vspr;
+				$tcp_sent += $vsps; }
+# print "# $peers $_\n";
+		}
+	}
+	$data{'n_connects'}{'value'} = $peers;
+	$data{'n_connect_sim'}{'value'} = $peers_sim;
+	$data{'n_connect_self'}{'value'} = $peers_self;
+	$data{'n_connect_awdl'}{'value'} = $peers_awdl;
+	$data{'n_connect_tcp'}{'value'} = $peers_tcp;
+	$data{'total_recv'}{'value'} = $total_recv;
+	$data{'total_sent'}{'value'} = $total_sent;
+	$data{'sim_recv'}{'value'} = $sim_recv;
+	$data{'sim_sent'}{'value'} = $sim_sent;
+	$data{'self_recv'}{'value'} = $self_recv;
+	$data{'self_sent'}{'value'} = $self_sent;
+	$data{'awdl_recv'}{'value'} = $awdl_recv;
+	$data{'awdl_sent'}{'value'} = $awdl_sent;
+	$data{'tcp_recv'}{'value'} = $tcp_recv;
+	$data{'tcp_sent'}{'value'} = $tcp_sent;
+    #
+}
+
+################################
+## Execution starts here        #
+#################################
+
+set_aspect();
+check_args();
+populate_stats();
+
+# We only get here if we're supposed to.
+#
+foreach my $value (sort keys %{$ASPECTS{$self}{'values'}}) {
+        if (defined($ASPECTS{$self}{'values'}{$value}{'rpn'})) {
+                print "$value.value ";
+                rpn($ASPECTS{$self}{'values'}{$value}{'rpn'});
+        } else {
+                if (print_dynamic($value,'.value',('value'))) {
+                        next;
+                }
+
+                if (!defined($data{$value}{'value'})) {
+                        if ($DEBUG) {
+                                print STDERR "Error: $value not part of "
+                                           . "yggdrasil statistic.\n";
+                        }
+                        next;
+                }
+                print "$value.value ";
+                print "$data{$value}{'value'}\n";
+        }
+}
+
