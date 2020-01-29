@@ -45,7 +45,7 @@ my %ASPECTS = (
         'connections' => {
                 # 'DEBUG' => 'YES',
                 'title' => 'Yggdrasil: connections to server',
-		'order' => 'n_connects n_connect_tcp n_connect_awdl '
+		'order' => 'n_connects n_connect_tcp n_connect_tls n_connect_awdl '
 			. 'n_connect_self n_connect_sim',
                 'args' => '-l 0',
                 'values' => {
@@ -80,7 +80,7 @@ my %ASPECTS = (
                 'title' => 'Yggdrasil: network traffic',
                 'info' => 'This graph shows the traffic of the yggdrasil network',
                 'vlabel' => 'Bytes/${graph_period} receive (-) / send (+)',
-                'order' => 'total_recv total_sent tcp_recv tcp_sent'
+                'order' => 'total_recv total_sent tcp_recv tcp_sent tls_recv tls_sent'
 			. 'awdl_recv awdl_senti self_recv self_sent'
 			. 'sim_recv sim_sent',
                 # 'args' => '-l 0',
@@ -456,10 +456,11 @@ sub populate_stats
 			if(/\s+awdl\s+/i){ $peers_awdl++; $awdl_recv += $vspr;
 				$awdl_sent += $vsps; }
 			if(/\s+tls\s+/){ $peers_tls++; $tls_recv += $vspr;
+# print "# $peers $vspr $vsps\n";
 				$tls_sent += $vsps; }
 			if(/\s+tcp\s+/){ $peers_tcp++; $tcp_recv += $vspr;
 				$tcp_sent += $vsps; }
-# print "# $peers $_\n";
+#  print "# $peers $_\n";
 		}
 	}
 	$data{'n_connects'}{'value'} = $peers;
@@ -467,6 +468,7 @@ sub populate_stats
 	$data{'n_connect_self'}{'value'} = $peers_self;
 	$data{'n_connect_awdl'}{'value'} = $peers_awdl;
 	$data{'n_connect_tcp'}{'value'} = $peers_tcp;
+	$data{'n_connect_tls'}{'value'} = $peers_tls;
 	$data{'total_recv'}{'value'} = $total_recv;
 	$data{'total_sent'}{'value'} = $total_sent;
 	$data{'sim_recv'}{'value'} = $sim_recv;
