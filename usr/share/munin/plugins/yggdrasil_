@@ -66,6 +66,10 @@ my %ASPECTS = (
                                 'type' => 'GAUGE',
 				'label' => 'AWDL connections'
                         },
+                        'n_connect_tls' => {
+                                'type' => 'GAUGE',
+				'label' => 'TLS connections'
+                        },
                         'n_connect_tcp' => {
                                 'type' => 'GAUGE',
 				'label' => 'TCP connections'
@@ -107,6 +111,19 @@ my %ASPECTS = (
 				'label' => 'TCP',
 				'info' => 'TCP traffic',
                                 'negative' => 'tcp_recv',
+                                'min' => '0'
+                        },
+                        'tls_recv' => {
+				'label' => 'TLS',
+                                'type' => 'DERIVE',
+                                'graph' => 'no',
+                                'min' => '0'
+                        },
+                        'tls_sent' => {
+                                'type' => 'DERIVE',
+				'label' => 'TLS',
+				'info' => 'TLS traffic',
+                                'negative' => 'tls_recv',
                                 'min' => '0'
                         },
                         'awdl_recv' => {
@@ -416,10 +433,11 @@ sub populate_stats
 	$data{'n_connects'}{'value'} = 0;
 	open my $yum, '-|', "$yggstatexec getPeers"
 		or die "Can't run '$yggstatexec getPeers': $!";
-	my ($peers,$peers_sim,$peers_self,$peers_awdl,$peers_tcp) =
-		(0, 0, 0, 0, 0);
+	my ($peers,$peers_sim,$peers_self,$peers_awdl,$peers_tcp,$peers_tls) =
+		(0, 0, 0, 0, 0, 0);
 	my ($total_recv, $total_sent) = (0,0);
 	my ($tcp_recv, $tcp_sent) = (0,0);
+	my ($tls_recv, $tls_sent) = (0,0);
 	my ($awdl_recv, $awdl_sent) = (0,0);
 	my ($self_recv, $self_sent) = (0,0);
 	my ($sim_recv, $sim_sent) = (0,0);
@@ -437,6 +455,8 @@ sub populate_stats
 				$self_sent += $vsps; }
 			if(/\s+awdl\s+/i){ $peers_awdl++; $awdl_recv += $vspr;
 				$awdl_sent += $vsps; }
+			if(/\s+tls\s+/){ $peers_tls++; $tls_recv += $vspr;
+				$tls_sent += $vsps; }
 			if(/\s+tcp\s+/){ $peers_tcp++; $tcp_recv += $vspr;
 				$tcp_sent += $vsps; }
 # print "# $peers $_\n";
@@ -455,6 +475,8 @@ sub populate_stats
 	$data{'self_sent'}{'value'} = $self_sent;
 	$data{'awdl_recv'}{'value'} = $awdl_recv;
 	$data{'awdl_sent'}{'value'} = $awdl_sent;
+	$data{'tls_recv'}{'value'} = $tls_recv;
+	$data{'tls_sent'}{'value'} = $tls_sent;
 	$data{'tcp_recv'}{'value'} = $tcp_recv;
 	$data{'tcp_sent'}{'value'} = $tcp_sent;
     #
