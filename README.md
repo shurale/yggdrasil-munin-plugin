@@ -1,6 +1,10 @@
 # yggdrasil-munin-plugin
 [Munin monitoring](http://munin-monitoring.org/) plugin for [yggdrasil mesh network server](https://yggdrasil-network.github.io/)
 
+Before commit 76cce895763338b5dd4187c079d456c168b1a441 - for yggdrasil v.3*
+
+After this commit - for version 0.4.3 and later
+
 ## Files
 Config file example: etc/munin/plugin-conf.d/yggdrasil
 
