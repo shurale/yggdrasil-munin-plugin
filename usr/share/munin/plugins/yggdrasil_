@@ -449,16 +449,16 @@ sub populate_stats
 			$vspr = $2; $vsps = $3;
 # print "# $peers ",$1, $2, $3,"\n";
 			$total_recv += $vspr;$total_sent += $vsps;
-			if(/\s+sim\s+/){ $peers_sim++; $sim_recv += $vspr;
+			if(/\s+sim:\/\//){ $peers_sim++; $sim_recv += $vspr;
 				$sim_sent += $vsps; }
-			if(/\s+self\s+/){ $peers_self++; $self_recv += $vspr;
+			if(/\s+self:\/\//){ $peers_self++; $self_recv += $vspr;
 				$self_sent += $vsps; }
-			if(/\s+awdl\s+/i){ $peers_awdl++; $awdl_recv += $vspr;
+			if(/\s+awdl:\/\//i){ $peers_awdl++; $awdl_recv += $vspr;
 				$awdl_sent += $vsps; }
-			if(/\s+tls\s+/){ $peers_tls++; $tls_recv += $vspr;
+			if(/\s+tls:\/\//){ $peers_tls++; $tls_recv += $vspr;
 # print "# $peers $vspr $vsps\n";
 				$tls_sent += $vsps; }
-			if(/\s+tcp\s+/){ $peers_tcp++; $tcp_recv += $vspr;
+			if(/\s+tcp:\/\//){ $peers_tcp++; $tcp_recv += $vspr;
 				$tcp_sent += $vsps; }
 #  print "# $peers $_\n";
 		}
